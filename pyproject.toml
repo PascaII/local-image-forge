@@ -11,6 +11,7 @@ requires-python = ">=3.12,<3.13"
 license = "MIT"
 dependencies = [
     "torch>=2.7",
+    "torchvision",
     "diffusers",
     "transformers>=5.17",
     "accelerate>=1.0",
@@ -23,6 +24,9 @@ local-image = "local_image_generator.cli:main"
 [tool.uv.sources]
 diffusers = { git = "https://github.com/huggingface/diffusers.git" }
 torch = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'win32'" },
+]
+torchvision = [
     { index = "pytorch-cu128", marker = "sys_platform == 'win32'" },
 ]
 

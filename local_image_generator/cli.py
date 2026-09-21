@@ -26,8 +26,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--offload", choices=("group", "sequential"), default="group",
         help="GPU memory strategy; sequential uses less VRAM but is slower",
     )
+    parser.add_argument(
+        "--no-postprocess", action="store_true",
+        help="Save the raw model output, skipping the dither/pixel-art pass",
+    )
+    parser.add_argument("--stats-json", type=Path, help="Also write settings and timing/memory stats to this JSON file")
     parser.add_argument("--dry-run", action="store_true", help="Show settings without downloading weights")
     return parser
+
+
+def format_stats(stats: dict) -> str:
+    return "\n".join([
+        f"Model load        {stats['model_load_s']:7.1f} s",
+        f"Text encoding     {stats['text_encode_s']:7.1f} s",
+        f"First step ready  {stats['time_to_first_step_s']:7.1f} s after start of generation",
+        f"Denoising         {stats['denoise_s']:7.1f} s ({stats['step_mean_s']:.2f} s/step, {stats['steps_per_s']:.2f} steps/s)",
+        f"VAE decode        {stats['vae_decode_s']:7.1f} s",
+        f"Time to image     {stats['time_to_image_s']:7.1f} s ({stats['s_per_megapixel']:.1f} s/MP)",
+        f"Total             {stats['total_s']:7.1f} s (includes imports and model load)",
+        f"Peak VRAM         {stats['peak_vram_reserved_gib']:7.1f} GiB reserved, "
+        f"{stats['peak_vram_allocated_gib']:.1f} GiB allocated",
+        "Peak RAM          " + (
+            f"{stats['peak_ram_gib']:7.1f} GiB" if stats["peak_ram_gib"] is not None else "    n/a"
+        ),
+    ])
 
 
 def _dimension(parser: argparse.ArgumentParser, name: str, value: int) -> int:
@@ -64,6 +86,7 @@ def make_settings(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
         "steps": steps,
         "seed": seed,
         "offload": args.offload,
+        "postprocess": None if args.no_postprocess else preset.postprocess,
         "output": str(output),
     }
 
@@ -83,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
     from .runtime import generate_image
 
     try:
-        generate_image(
+        stats = generate_image(
             prompt=settings["prompt"],
             width=settings["width"],
             height=settings["height"],
@@ -91,9 +114,14 @@ def main(argv: list[str] | None = None) -> int:
             seed=settings["seed"],
             output=output,
             offload=settings["offload"],
+            postprocess=settings["postprocess"],
         )
     except RuntimeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     print(f"Saved {output}")
+    print(format_stats(stats))
+    if args.stats_json is not None:
+        args.stats_json.parent.mkdir(parents=True, exist_ok=True)
+        args.stats_json.write_text(json.dumps({**settings, "stats": stats}, indent=2) + "\n")
     return 0
